@@ -1,0 +1,7 @@
+*.orig
+*.plist
+*.csv
+*.txt
+build
+.cache
+__pycache__

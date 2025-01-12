@@ -1,0 +1,3 @@
+[submodule "tester/stm32tester/Core/Lib/MCTP"]
+	path = tester/stm32tester/Core/Lib/MCTP
+	url = https://github.com/blr-ophon/MCTP
