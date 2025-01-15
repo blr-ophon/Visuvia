@@ -39,10 +39,8 @@ from enum import Enum
 import struct
 
 
-__all__ = ["MCTPFrame", "MSFPParseError", "serialize_frame"]
+__all__ = ["MCTPFrame", "MCTPParseError", "serialize_frame"]
 
-
-# Globals/Macros
 
 # Struct unpacking
 HEADER_FORMAT = '<BH5B'
@@ -56,19 +54,16 @@ MIN_FRAME_SIZE = HEADER_SIZE + EOM_SIZE
 MAX_CHANNELS = 32
 
 
-# Enums
-
-
 class ParserErrorCode(Enum):
     """
     Enum for parsing error codes.
     """
-    ELESSMIN = 0     # Packet smaller than minimun size
+    ELESSMIN = 0         # Packet smaller than minimun size
     EUNMATCHSIZE = 1     # header data size not matching data section size
-    EBADTYPE = 2     # Unknown frame type specifier
+    EBADTYPE = 2         # Unknown frame type specifier
     EBADDATATYPE = 3     # Unknown data type specifier
-    EBADDATA = 4     # Datainfo does not describe data accurately
-    ECHEXCEED = 5     # More than 32 channels specified
+    EBADDATA = 4         # Datainfo does not describe data accurately
+    ECHEXCEED = 5        # More than 32 channels specified
 
 
 class FrameType(Enum):
@@ -76,7 +71,7 @@ class FrameType(Enum):
     Enum for the MCTP frame type identifiers.
     Values from MCTP specification.
     """
-    UNKNOWN = 0
+    NONE = 0
     SYNC = 1
     SYNC_RESP = 2
     ACK = 3
@@ -105,11 +100,19 @@ class DataType(Enum):
 
 class MCTPParseError(Exception):
     """
-    Custom exception for parsing errors
+    Custom exception for parsing errors.
+
+    Args:
+        msg (str): String describing exception.
+        code (ParserErrorCode): Error Code
+
+    Attributes:
+        msg (str): String describing exception.
+        code (ParserErrorCode): Error Code
     """
-    def __init__(self, error_code):
-        self.error_code = error_code
-        self.message = f"Parsing error occurred: {error_code.name}"
+    def __init__(self, msg, code):
+        self.code = code
+        self.message = f"{msg}: {code.name}"
         super().__init__(self.message)
 
     def __str__(self):
@@ -142,7 +145,7 @@ class MCTPFrame():
     """
     def __init__(self):
         self.frame_type = None
-        self.__frame_type_enum = FrameType.UNKNOWN
+        self.__frame_type_enum = FrameType.NONE
         self.data_size = 0
         self.data_channels: dict[int, list] = {}
         self.text_channels: dict[int, str] = {}
@@ -177,7 +180,8 @@ class MCTPFrame():
 
         if len(raw_msg) < MIN_FRAME_SIZE:
             print(raw_msg)
-            raise MCTPParseError(ParserErrorCode.ELESSMIN)
+            raise MCTPParseError("Error while parsing",
+                                 ParserErrorCode.ELESSMIN)
 
         # Divide into Header and Data sections
         mctp_header = raw_msg[:8]
@@ -188,7 +192,8 @@ class MCTPFrame():
             self.__frame_type_enum = FrameType(type_identifier)
             self.frame_type = self.__frame_type_enum.name.lower()
         except ValueError as exc:
-            raise MCTPParseError(ParserErrorCode.EBADTYPE) from exc
+            raise MCTPParseError("Error while parsing header",
+                                 ParserErrorCode.EBADTYPE) from exc
 
         mctp_data = raw_msg[HEADER_SIZE:HEADER_SIZE + self.data_size]
 
@@ -199,14 +204,16 @@ class MCTPFrame():
                 # Get number of channels
                 self.n_of_channels = struct.unpack('<B', mctp_data[0:1])[0]
                 if self.n_of_channels > MAX_CHANNELS:
-                    raise MCTPParseError(ParserErrorCode.ECHEXCEED)
+                    raise MCTPParseError("Error while parsing data",
+                                         ParserErrorCode.ECHEXCEED)
                 total_data_read += 1
 
             case FrameType.DATA:
                 # Get number of channels
                 self.n_of_channels = struct.unpack('<B', mctp_data[0:1])[0]
                 if self.n_of_channels > MAX_CHANNELS:
-                    raise MCTPParseError(ParserErrorCode.ECHEXCEED)
+                    raise MCTPParseError("Error while parsing data",
+                                         ParserErrorCode.ECHEXCEED)
                 total_data_read += 1
 
                 datainfo_beg = 1
@@ -219,13 +226,15 @@ class MCTPFrame():
                             DATAINFO_FORMAT,
                             mctp_data[datainfo_beg:datainfo_end])
                     except struct.error as exc:
-                        raise MCTPParseError(ParserErrorCode.EBADDATA) from exc
+                        raise MCTPParseError("Error while parsing data",
+                                             ParserErrorCode.EBADDATA) from exc
 
                     # Check if data matches header before attempting to
                     # parse channeldata
                     total_data_read += DATAINFO_SIZE + ch_data_size
                     if total_data_read > self.data_size:
-                        raise MCTPParseError(ParserErrorCode.EUNMATCHSIZE)
+                        raise MCTPParseError("Error while parsing data",
+                                             ParserErrorCode.EUNMATCHSIZE)
 
                     # Convert and get data
                     ch_raw_data = mctp_data[datainfo_end:datainfo_end+ch_data_size]
@@ -235,7 +244,8 @@ class MCTPFrame():
                             ch_datatype_identifier
                         )
                     except MCTPParseError as exc:
-                        raise MCTPParseError(ParserErrorCode.EBADDATA) from exc
+                        raise MCTPParseError("Error while parsing data",
+                                             ParserErrorCode.EBADDATA) from exc
 
                     if DataType(ch_datatype_identifier) == DataType.CHAR:
                         self.text_channels[ch_id] = parsed_data[0].decode("utf-8")
@@ -264,7 +274,8 @@ class MCTPFrame():
         try:
             data_type = DataType(datatype_identifier)
         except ValueError as exc:
-            raise MCTPParseError(ParserErrorCode.EBADDATATYPE) from exc
+            raise MCTPParseError("Error while converting data",
+                                 ParserErrorCode.EBADDATATYPE) from exc
 
         format_code, var_size = _parse_datatype(data_type)
 
@@ -274,7 +285,8 @@ class MCTPFrame():
         try:
             converted_data = struct.unpack(format_string, raw_data)
         except struct.error as exc:
-            raise MCTPParseError(ParserErrorCode.EBADDATATYPE) from exc
+            raise MCTPParseError("Error while converting data",
+                                 ParserErrorCode.EBADDATATYPE) from exc
 
         return converted_data
 
@@ -284,7 +296,7 @@ def _string_to_frame_type(frame_type_str):
     output = ""
     match frame_type_str:
         case "unknown":
-            output = FrameType.UNKNOWN
+            output = FrameType.NONE
         case "sync":
             output = FrameType.SYNC
         case "sync_resp":

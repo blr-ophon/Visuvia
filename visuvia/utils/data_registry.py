@@ -1,9 +1,10 @@
 """
 This module provides the DataRegistry object.
 
-The DataRegistry object holds all sampled data during data transfer in an array
-and creates an array with estimated times for each sample. It is meant to hold
-data for time domain plotting.
+The DataRegistry object holds all numerical data acquired during data transfer
+in an array and creates an array with estimated times for each sample. It is
+meant to hold data for time domain plotting. It also holds text data in a
+string.
 
 Dependencies:
 - numpy
@@ -29,7 +30,7 @@ class DataChannel():
         x_data (np.array): Time data for the x axis.
         y_data (np.array): Data for the y axis.
         recv_time (float): Time when current data was appended, relative
-            to start_time_ref.
+                           to start_time_ref of the registry.
     """
     recv_time: float
     x_data: np.array
@@ -49,16 +50,6 @@ class DataRegistry():
     Attributes:
         channels (dict[int, PlotData]):
         start_time_ref (float):
-
-    Public Methods:
-        add_channel: Add new channel to registry. Overwrites channel.
-        set_time_ref: Set time reference.
-        append_data: Append data to channels.
-        save_data: Save channels data to csv files.
-        clear: Clear all channels.
-
-    Private Methods:
-        __generate_time_array: Generate time array for an array of samples.
     """
     def __init__(self):
         self.channels: dict[int, DataChannel] = {}
@@ -66,10 +57,10 @@ class DataRegistry():
 
     def add_channel(self, ch_id):
         """
-        Adds a new empty channel to the registry. Overwrites
-        if channel was added previously.
+        Add new empty channel to the registry. Overwrites if channel
+        was added previously.
 
-        Parameters:
+        Args:
             ch_id: Channel number/ID.
 
         Returns:
@@ -82,7 +73,8 @@ class DataRegistry():
 
     def set_time_ref(self):
         """
-        Set initial time reference for plotting in the registry.
+        Set initial time reference for plotting. Meant to be the time
+        when the transfer phase starts.
 
         Returns:
             None: Returns nothing.
@@ -91,15 +83,16 @@ class DataRegistry():
 
     def append_data(self, frame_data):
         """
-        Parameters:
+        Append new data to registry.
+
+        Args:
             frame_data (dict[int | list]): Dictionary where keys are channels
-            and values are data to be appended to that channel. This should
-            be the data parsed from a DATA frame.
+            and values are data to be appended to that channel. This is meant
+            to be the data_channels dict from a parsed DATA frame.
 
         Returns:
             None: Returns nothing.
         """
-
         # Time since the time reference.
         relative_time = time.time() - self.start_time_ref
 
@@ -119,6 +112,17 @@ class DataRegistry():
             channel.y_data = np.append(channel.y_data, np.array(ch_data))
 
     def append_text(self, frame_text_data):
+        """
+        Append new text to registry.
+
+        Args:
+            frame_data (dict[int | list]): Dictionary where keys are channels
+            and values are the texts to be appended to that channel. This is
+            meant to be the text_channels dict from a parsed DATA frame.
+
+        Returns:
+            None: Returns nothing.
+        """
         relative_time = time.time() - self.start_time_ref
 
         for ch_id, ch_text in frame_text_data.items():
@@ -130,7 +134,8 @@ class DataRegistry():
 
     def save_data(self):
         """
-        Write data from all channels containing data to individual csv files.
+        Write data from all channels containing plot and/or text data to csv
+        and txt files.
 
         Returns:
             None: Returns nothing.
@@ -183,7 +188,7 @@ class DataRegistry():
         Generate an array of times based on the input array,
         the period and start time reference.
 
-        Parameters:
+        Args:
             arr (list[int | float]): Input array.
             full_period (float): The time interval for the entire array.
             start_time (float): The starting time reference for the array.

@@ -1,5 +1,11 @@
-import argparse
+"""
+Execute visuvia on GUI or CMD mode, which is a mode for just data transfer.
+"""
 
+
+# Standard library imports
+import argparse
+# Local imports
 from visuvia.gui import root
 from visuvia.mctp_comm import CommTask
 from visuvia.utils.serial_ctrl import SerialCtrl

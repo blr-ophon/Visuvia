@@ -1,17 +1,11 @@
 """
-This module provides the CommTask object.
+This module provides the CommTask class.
 
-The CommTask implements the MCTP finite state machine for controller,
+The CommTask implements the MCTP controller side finite state machine,
 which handles MCTP connection between performer and controller. It
 works independently as a thread and contains methods to start and
 stop the thread, as well as methods for user-triggered events of the
 finite state machine.
-
-The GUI interacts with the communication task by calling it's methods
-according to user input, such as requesting data after a button is pressed.
-The communication task interacts with the GUI by calling GUI methods based
-on it's internal events, such as displaying available channels after the .
-end of sync phase.
 """
 
 
@@ -24,7 +18,7 @@ from visuvia.utils.mctp import MCTPFrame, MCTPParseError, serialize_frame
 from visuvia.gui.orders import ConnManOrder
 
 
-__all__ = ["CommTask"]
+__all__ = ["CommTask", "CommTaskState"]
 
 
 class CommTaskState(Enum):
@@ -44,27 +38,29 @@ class CommTask():
     """
     Finite state machine for serial connection
 
+    Args:
+        serial_ctrl (SerialCtrl): Initialized serial controller for serial
+                                  communication.
+        data_registry (DataRegistry): Data registry to which incoming data will
+                                      be appended.
+        connman_gui (ConnManagerGUI, optional): GUI to display connection
+                                                status.
+
     Attributes:
-        state (CommTaskState):
-        serial_ctrl (SerialCtrl):
-        data_registry (DataRegistry):
-        connman_gui (ConnManagerGUI):
-        thread (threading.Thread):
-        change_state (threading.Condition()):
-        running (bool):
-
-    Public Methods:
-        start: Start CommTask thread.
-        stop: Stop CommTask thread.
-        start_sync: Start SYNC phase.
-        send_request: Start requesting data.
-        send_stop: Stop data transfer.
-        send_drop: Drop connection.
-
-    Private Methods:
-        __run: CommTask thread target.
-        __set_state: Set CommTask state.
-        __print_state: Print CommTask state.
+        serial_ctrl (SerialCtrl): Initialized serial controller for serial
+                                  communication.
+        data_registry (DataRegistry): Data registry to which incoming data
+                                      will be appended.
+        connman_gui (ConnManagerGUI): GUI to display connection status.
+        state (CommTaskState): State of the communication task finite
+                               state machine.
+        thread (threading.Thread): CommTask thread.
+        update (threading.Condition()): Condition to notify state
+                                              change to the thread.
+        running (bool): Set when thread is running. Control thread execution.
+        flag_send_req (bool):
+        flag_send_stop (bool):
+        flag_send_drop (bool):
     """
     def __init__(self, serial_ctrl, data_registry, connman_gui=None):
         self.state = CommTaskState.IDLE
@@ -73,11 +69,11 @@ class CommTask():
         self.connman_gui = connman_gui
 
         self.thread = None
-        self.change_state = threading.Condition()
+        self.update = threading.Condition()
         self.running = False
 
-        # USER ACTIONS
-        # All data transfer must happen inside commtask thread
+        # Set flags for the main thread to execute actions.
+        # All serial communication must happen inside commtask thread.
         self.flag_send_req = False
         self.flag_send_stop = False
         self.flag_send_drop = False
@@ -90,7 +86,7 @@ class CommTask():
             None: Returns nothing.
         """
         self.running = True
-        self.__set_state(CommTaskState.IDLE)
+        self._set_state(CommTaskState.IDLE)
         self.thread = threading.Thread(target=self.__run, daemon=True)
         self.thread.start()
 
@@ -102,7 +98,7 @@ class CommTask():
             None: Returns nothing.
         """
         self.running = False
-        self.__set_state(CommTaskState.IDLE)
+        self._set_state(CommTaskState.IDLE)
         self.thread.join()
         self.send_drop()
 
@@ -116,7 +112,7 @@ class CommTask():
         if self.connman_gui is not None:
             self.connman_gui.enqueue_update(ConnManOrder.STATUS_SYNCING)
         if self.state == CommTaskState.IDLE:
-            self.__set_state(CommTaskState.SYNC)
+            self._set_state(CommTaskState.SYNC)
 
     def send_request(self):
         """
@@ -125,19 +121,14 @@ class CommTask():
         Returns:
             None: Returns nothing.
         """
-        # Check current state
         if self.state != CommTaskState.CONNECTED:
             return
 
-        # Set state to listening
-        self.__set_state(CommTaskState.LISTENING)
+        self._set_state(CommTaskState.LISTENING)
 
-        # Send REQUEST frame
-        req_frame = serialize_frame(frame_type="request")
-        self.serial_ctrl.send(req_frame)
-
-        # Initialize time reference for plotting. TODO: Use RDY frame
-        self.data_registry.set_time_ref()
+        with self.update:
+            self.flag_send_req = True
+            self.update.notify()
 
     def send_stop(self):
         """
@@ -146,13 +137,12 @@ class CommTask():
         Returns:
             None: Returns nothing.
         """
-        # Check current state
         if self.state != CommTaskState.LISTENING:
             return
 
-        # Send STOP frame
-        stop_frame = serialize_frame(frame_type="stop")
-        self.serial_ctrl.send(stop_frame)
+        with self.update:
+            self.flag_send_stop = True
+            self.update.notify()
 
     def send_drop(self):
         """
@@ -161,13 +151,41 @@ class CommTask():
         Returns:
             None: Returns nothing.
         """
-        drop_frame = serialize_frame(frame_type="drop")
-        self.serial_ctrl.send(drop_frame)
-        self.__set_state(CommTaskState.IDLE)
+        self.flag_send_drop = True
+        self._set_state(CommTaskState.IDLE)
+
+    def __application_event_handler(self):
+        """
+        Check for application-trigerred events.
+
+        Returns:
+            None: Returns nothing.
+        """
+        # Drop has highest priority.
+        if self.flag_send_drop:
+            drop_frame = serialize_frame(frame_type="drop")
+            self.serial_ctrl.send(drop_frame)
+            self.flag_send_drop = False
+
+        elif self.flag_send_req:
+            req_frame = serialize_frame(frame_type="request")
+            self.serial_ctrl.send(req_frame)
+            self.flag_send_req = False
+
+            # Initialize time reference for plotting.
+            # This disconsiders the time for the request frame to arrive and
+            # the time for MCU to start sending data after being notified.
+            # FIXME: Use a dummy RDY packet to set reference for plot.
+            self.data_registry.set_time_ref()
+
+        elif self.flag_send_stop:
+            stop_frame = serialize_frame(frame_type="stop")
+            self.serial_ctrl.send(stop_frame)
+            self.flag_send_stop = False
 
     def __run(self):
         """
-        Communication task thread. Implements the MCTP controller finite
+        Communication task thread. Implements the MCTP controller side finite
         state machine
 
         Returns:
@@ -177,11 +195,13 @@ class CommTask():
         sync_timeout_start_time = 0
 
         while self.running:
-            with self.change_state:
+            with self.update:
+
+                self.__application_event_handler()
 
                 if self.state == CommTaskState.IDLE:
                     # Do nothing. Wait for user/GUI to change this state
-                    self.change_state.wait()
+                    self.update.wait()
 
                 elif self.state == CommTaskState.SYNC:
 
@@ -222,7 +242,7 @@ class CommTask():
                         # self.serial_ctrl.send(ack_frame)
 
                         # Switch to connected
-                        self.__set_state(CommTaskState.CONNECTED)
+                        self._set_state(CommTaskState.CONNECTED)
 
                         #  Update GUI
                         if self.connman_gui is not None:
@@ -244,7 +264,7 @@ class CommTask():
                             sync_timeout_start = False
                             print(">> SYNC failed")
                             # Return to IDLE
-                            self.__set_state(CommTaskState.IDLE)
+                            self._set_state(CommTaskState.IDLE)
                             #  Update GUI
                             if self.connman_gui is not None:
                                 self.connman_gui.enqueue_update(
@@ -254,7 +274,7 @@ class CommTask():
                 elif self.state == CommTaskState.CONNECTED:
                     # TODO: keep connection alive through PING
                     # Do nothing. Wait for user prompt on GUI (Start Button)
-                    self.change_state.wait()
+                    self.update.wait()
 
                     # Send message to MCU
                     # Switch state to listening
@@ -279,7 +299,7 @@ class CommTask():
                         continue
 
                     if received_frame.frame_type == "stop":
-                        self.__set_state(CommTaskState.CONNECTED)
+                        self._set_state(CommTaskState.CONNECTED)
                     elif received_frame.frame_type == "data":
                         # GUI
                         if self.connman_gui is not None:
@@ -310,29 +330,29 @@ class CommTask():
                         self.data_registry.append_text(
                             received_frame.text_channels)
 
-    def __set_state(self, new_state):
+    def _set_state(self, new_state):
         """
         Change communication task state and notify thread.
 
-        Parameters:
+        Args:
             new_state (CommTaskState): New state to be set.
 
         Returns:
             None: Returns nothing.
         """
-        with self.change_state:
+        with self.update:
             print(f"{self.state} >> {new_state}")
             self.state = new_state
             # Wake up the thread waiting on this condition
-            self.change_state.notify()
-            self.__print_state(new_state)
+            self.update.notify()
+            self._print_state(new_state)
 
     @staticmethod
-    def __print_state(state):
+    def _print_state(state):
         """
         Print state on terminal with appropriate color.
 
-        Parameters:
+        Args:
             state (CommTaskState): State name to print.
 
         Returns:
