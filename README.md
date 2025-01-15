@@ -14,9 +14,13 @@ Currently in test. Only tested with STM32F3 MCUs.
 
 ## Running
 
+Clone the repository:
+
 ```bash
   git clone --recurse-submodules https://github.com/blr-ophon/visuvia
 ```
+
+Launch with:
 
 ```bash
   python main.py --gui 
@@ -35,8 +39,8 @@ GUI allows data visualization in real time, cmd saves  received data to csv and 
 
 ## CMD commands
 
-**sync**: Try to connect to microcontroller.
-**drop**: Disconnect from microcontroller.
-**request**: Start receiving data.
-**stop**: Stop data transfer. Save data to csv and text files.
-**exit**: Exit visuvia cmd.
+**sync**: Try to connect to microcontroller.  
+**drop**: Disconnect from microcontroller.  
+**request**: Start receiving data.  
+**stop**: Stop data transfer. Save data to csv and text files.  
+**exit**: Exit visuvia cmd.  
