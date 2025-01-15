@@ -15,6 +15,10 @@ Currently in test. Only tested with STM32F3 MCUs.
 ## Running
 
 ```bash
+  git clone --recurse-submodules https://github.com/blr-ophon/visuvia
+```
+
+```bash
   python main.py --gui 
 ```
 or 
