@@ -45,6 +45,8 @@ if __name__ == "__main__":
                     task.send_drop()
                 case "exit":
                     running = False
+                case _:
+                    print(f"Unknown command: {command}")
     else:
         print("GUI mode")
         root.init()
