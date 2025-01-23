@@ -8,14 +8,21 @@ stop the thread, as well as methods for user-triggered events of the
 finite state machine.
 """
 
+# TODO: Make queue gui-agnostic, so that the same queue can be used by
+# tkinter, cmd application and any other interfaces. Let the queue be
+# inside the class, so that the interface checks inside the task instead
+# of the task appending to a gui queue.
+# TODO: stop immediately if SerialCtrlError occurs
 
 # Standard library imports
+import sys
 import time
 import threading
 from enum import Enum
 # Local imports
 from visuvia.utils.mctp import MCTPFrame, MCTPParseError, serialize_frame
 from visuvia.gui.orders import ConnManOrder
+from visuvia.utils.serial_ctrl import SerialCtrlError
 
 
 __all__ = ["CommTask", "CommTaskState"]
@@ -28,10 +35,49 @@ class CommTaskState(Enum):
     IDLE = 1
     SYNC = 2
     CONNECTED = 3
-    LISTENING = 4
+    TRANSFER = 4
 
     def __str__(self):
         return self.name
+
+class TimeoutHandler():
+    def __init__(self):
+        self.timeouts = {
+            "sync": None,
+            "ping": None,
+            "stop": None,
+            "drop": None
+        }
+        self.start_times = {
+            "sync": None,
+            "ping": None,
+            "stop": None,
+            "drop": None,
+        }
+
+    def set_timeout(self, frame_type, timeout):
+        """ Start timeout count for the type"""
+        self.timeouts[frame_type] = timeout
+        self.start_times[frame_type] = time.time()
+
+    def check_timeout(self, frame_type):
+        """ Start timeout count for the type"""
+        timeout = self.timeouts[frame_type]
+        if timeout is None:
+            print("Error: Checking unitialized timer")
+            return False
+
+        start_time = self.start_times[frame_type]
+
+        if time.time() - start_time > timeout:
+            self.timeouts[frame_type] = None
+            self.start_times[frame_type] = 0
+            return True
+
+        return False
+
+    def is_enabled(self, frame_type):
+        return bool(self.timeouts[frame_type])
 
 
 class CommTask():
@@ -78,6 +124,11 @@ class CommTask():
         self.flag_send_stop = False
         self.flag_send_drop = False
 
+        self.frames_received = 0
+        self.bytes_received = 0
+
+        self.timeouts = TimeoutHandler()
+
     def start(self):
         """
         Start communication task thread.
@@ -116,7 +167,7 @@ class CommTask():
 
     def send_request(self):
         """
-        Switch from CONNECTED to LISTENING state. Sends REQUEST frame.
+        Switch from CONNECTED to TRANSFER state. Sends REQUEST frame.
 
         Returns:
             None: Returns nothing.
@@ -124,7 +175,7 @@ class CommTask():
         if self.state != CommTaskState.CONNECTED:
             return
 
-        self._set_state(CommTaskState.LISTENING)
+        self._set_state(CommTaskState.TRANSFER)
 
         with self.update:
             self.flag_send_req = True
@@ -132,17 +183,21 @@ class CommTask():
 
     def send_stop(self):
         """
-        Send STOP frame. Only works if task is in listening state.
+        Send STOP frame. Only works if task is in transfer state.
 
         Returns:
             None: Returns nothing.
         """
-        if self.state != CommTaskState.LISTENING:
+        if self.state != CommTaskState.TRANSFER:
             return
 
-        with self.update:
-            self.flag_send_stop = True
-            self.update.notify()
+        self.flag_send_stop = True
+        # with self.update:
+        #     self.flag_send_stop = True
+        #     self.update.notify()
+
+        self.frames_received = 0
+        self.bytes_received = 0
 
     def send_drop(self):
         """
@@ -151,8 +206,9 @@ class CommTask():
         Returns:
             None: Returns nothing.
         """
-        self.flag_send_drop = True
-        self._set_state(CommTaskState.IDLE)
+        with self.update:
+            self.flag_send_drop = True
+            self.update.notify()
 
     def __application_event_handler(self):
         """
@@ -163,8 +219,7 @@ class CommTask():
         """
         # Drop has highest priority.
         if self.flag_send_drop:
-            drop_frame = serialize_frame(frame_type="drop")
-            self.serial_ctrl.send(drop_frame)
+            self.__drop_loop()
             self.flag_send_drop = False
 
         elif self.flag_send_req:
@@ -179,9 +234,9 @@ class CommTask():
             self.data_registry.set_time_ref()
 
         elif self.flag_send_stop:
-            stop_frame = serialize_frame(frame_type="stop")
-            self.serial_ctrl.send(stop_frame)
-            self.flag_send_stop = False
+            self.__stop_loop()
+            self.frames_received = 0
+            self.bytes_received = 0
 
     def __run(self):
         """
@@ -191,8 +246,6 @@ class CommTask():
         Returns:
             None: Returns nothing.
         """
-        sync_timeout_start = False
-        sync_timeout_start_time = 0
 
         while self.running:
             with self.update:
@@ -205,71 +258,37 @@ class CommTask():
 
                 elif self.state == CommTaskState.SYNC:
 
-                    # Send sync frame
-                    sync_frame = serialize_frame(frame_type="sync")
-                    self.serial_ctrl.send(sync_frame)
-
-                    # Poll for response
-                    response = self.serial_ctrl.listen_msg(b"$%&")
-
-                    # Always check if fsm has not been stopped during blocking
-                    # operation after it is done
-                    if not self.running:
-                        continue
-
-                    # Parse and validate response
-                    if response is None:
-                        continue
-
-                    try:
-                        received_frame = MCTPFrame()
-                        received_frame.parse(response)
-                    except MCTPParseError as exc:
-                        print(exc)
-                        continue
-                    except UnicodeDecodeError:
-                        # TODO: Put in parser. Error when decoding utf-8.
-                        continue
-
-                    if received_frame.frame_type == "sync_resp":
-                        # Configure channels
-                        for i in range(received_frame.n_of_channels):
-                            self.data_registry.add_channel(ch_id=i)
-
-                        # Send Acknowledge
-                        ack_frame = serialize_frame(frame_type="ack")
-                        self.serial_ctrl.send(ack_frame)
-                        # self.serial_ctrl.send(ack_frame)
-
-                        # Switch to connected
-                        self._set_state(CommTaskState.CONNECTED)
-
+                    received_frame = self.__sync_loop()
+                    if received_frame is None:
+                        print(">> SYNC failed")
+                        # Return to IDLE
+                        self._set_state(CommTaskState.IDLE)
                         #  Update GUI
                         if self.connman_gui is not None:
-                            self.connman_gui.ch_info_gui.place_channel_info()
-
                             self.connman_gui.enqueue_update(
-                                ConnManOrder.STATUS_CONNECTED,
-                                received_frame.n_of_channels
+                                ConnManOrder.STATUS_FAILED
                             )
+                        continue
 
-                    else:
-                        # TODO: improper, this does not handle the MCU not sending anything
-                        # Try syncing until timeout
-                        if not sync_timeout_start:
-                            sync_timeout_start = True
-                            sync_timeout_start_time = time.time()
+                    # Configure channels
+                    for i in range(received_frame.n_of_channels):
+                        self.data_registry.add_channel(ch_id=i)
 
-                        if time.time() - sync_timeout_start_time > 3:
-                            sync_timeout_start = False
-                            print(">> SYNC failed")
-                            # Return to IDLE
-                            self._set_state(CommTaskState.IDLE)
-                            #  Update GUI
-                            if self.connman_gui is not None:
-                                self.connman_gui.enqueue_update(
-                                    ConnManOrder.STATUS_FAILED
-                                )
+                    # Send Acknowledge
+                    ack_frame = serialize_frame(frame_type="ack")
+                    self.serial_ctrl.send(ack_frame)
+
+                    # Switch to connected
+                    self._set_state(CommTaskState.CONNECTED)
+
+                    #  Update GUI
+                    if self.connman_gui is not None:
+                        self.connman_gui.ch_info_gui.place_channel_info()
+
+                        self.connman_gui.enqueue_update(
+                            ConnManOrder.STATUS_CONNECTED,
+                            received_frame.n_of_channels
+                        )
 
                 elif self.state == CommTaskState.CONNECTED:
                     # TODO: keep connection alive through PING
@@ -277,12 +296,11 @@ class CommTask():
                     self.update.wait()
 
                     # Send message to MCU
-                    # Switch state to listening
+                    # Switch state to transfer
 
-                elif self.state == CommTaskState.LISTENING:
+                elif self.state == CommTaskState.TRANSFER:
                     # Poll for message
                     response = self.serial_ctrl.listen_msg(b"$%&")
-                    # print(response)
                     if response is None:
                         continue
 
@@ -298,9 +316,7 @@ class CommTask():
                         print(exc)
                         continue
 
-                    if received_frame.frame_type == "stop":
-                        self._set_state(CommTaskState.CONNECTED)
-                    elif received_frame.frame_type == "data":
+                    if received_frame.frame_type == "data":
                         # GUI
                         if self.connman_gui is not None:
                             # List channels received to update channel info.
@@ -329,6 +345,110 @@ class CommTask():
                             received_frame.data_channels)
                         self.data_registry.append_text(
                             received_frame.text_channels)
+
+                        self.frames_received += 1
+                        self.bytes_received += received_frame.data_size
+                        self.__print_transfer()
+
+    def __stop_loop(self):
+        """
+        Send stop frames until a confirmation is received.
+        """
+        stop_frame = serialize_frame(frame_type="stop")
+        self.serial_ctrl.send(stop_frame)
+        received_frame = MCTPFrame()
+
+        # Send STOP frames until a stop confirmation arrives
+        # or it timeouts.
+        self.timeouts.set_timeout("stop", 2)
+        while received_frame.frame_type != "stop":
+            if self.timeouts.check_timeout("stop"):
+                print("STOP confirmation timeout. Dropping connection")
+                self._set_state(CommTaskState.IDLE)
+                return
+
+            try:
+                self.serial_ctrl.send(stop_frame)
+                response = self.serial_ctrl.listen_msg(delimiter=b"$%&")
+                if response is not None:
+                    received_frame.parse(response)
+            except SerialCtrlError as exc:
+                print(exc)
+                # TODO: raise
+                self.stop()
+                return
+            except MCTPParseError as exc:
+                print(exc)
+                continue
+
+        self._set_state(CommTaskState.CONNECTED)
+        self.flag_send_stop = False
+
+    def __drop_loop(self):
+        """
+        Send drop frames until a confirmation is received.
+        """
+        drop_frame = serialize_frame(frame_type="drop")
+        self.serial_ctrl.send(drop_frame)
+        received_frame = MCTPFrame()
+
+        self.timeouts.set_timeout("drop", 3)
+        while received_frame.frame_type != "drop":
+            if self.timeouts.check_timeout("drop"):
+                print("Warning: DROP confirmation timeout. \
+Restart performer if future connection attempts fails")
+                self._set_state(CommTaskState.IDLE)
+                return
+
+            try:
+                self.serial_ctrl.send(drop_frame)
+                response = self.serial_ctrl.listen_msg(delimiter=b"$%&")
+                if response is not None:
+                    received_frame.parse(response)
+            except SerialCtrlError as exc:
+                print(exc)
+                # TODO: raise
+                self.stop()
+                return
+            except MCTPParseError as exc:
+                print(exc)
+                continue
+
+        self._set_state(CommTaskState.IDLE)
+        self.flag_send_drop = False
+
+    def __sync_loop(self):
+        """
+        Send sync frames until a confirmation arrives.
+        """
+        sync_frame = serialize_frame(frame_type="sync")
+        received_frame = MCTPFrame()
+
+        self.timeouts.set_timeout("sync", 5)
+        while received_frame.frame_type != "sync_resp":
+            if self.timeouts.check_timeout("sync"):
+                print("SYNC confirmation timeout. Dropping connection")
+                self._set_state(CommTaskState.IDLE)
+                return None
+
+            try:
+                self.serial_ctrl.send(sync_frame)
+                response = self.serial_ctrl.listen_msg(delimiter=b"$%&")
+                if response is not None:
+                    received_frame.parse(response)
+            except SerialCtrlError as exc:
+                print(exc)
+                self.stop()
+                # TODO: raise
+                return None
+            except MCTPParseError as exc:
+                print(exc)
+                continue
+            except UnicodeDecodeError:
+                # TODO: Put in parser. Error when decoding utf-8.
+                continue
+
+        return received_frame
 
     def _set_state(self, new_state):
         """
@@ -366,7 +486,12 @@ class CommTask():
                 color = 33
             case CommTaskState.CONNECTED:
                 color = 31
-            case CommTaskState.LISTENING:
+            case CommTaskState.TRANSFER:
                 color = 92
 
         print(f"\033[{color}m[{state}]\033[0m")
+
+    def __print_transfer(self):
+        # Need curses to work or a separate thread + no echo input
+        sys.stdout.write(f"\r{self.frames_received} frames | {self.bytes_received} bytes")
+        sys.stdout.flush()

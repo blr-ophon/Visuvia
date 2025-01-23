@@ -148,7 +148,7 @@ class SerialManagerGUI():
             baudrate = self.clicked_bd.get()
             try:
                 self.serial_ctrl.set_serial(port_name=port_name,
-                                            baudrate=baudrate, timeout=2)
+                                            baudrate=baudrate, timeout=0.5)
                 # Update widgets.
                 self.btn_connect["text"] = "Disconnect"
                 self.btn_refresh["state"] = "disable"

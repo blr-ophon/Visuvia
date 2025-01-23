@@ -13,6 +13,7 @@ Dependencies:
 # Standard library imports
 from dataclasses import dataclass
 import time
+import os
 import csv
 # Third party imports
 import numpy as np
@@ -141,23 +142,29 @@ class DataRegistry():
             None: Returns nothing.
         """
         print("Saving data")
+        folder_path = "../../folder"
+        os.makedirs(folder_path, exist_ok=True)
+        
         for ch_id, channel in self.channels.items():
             if channel.x_data.size == 0:
                 continue
-            filename = f"channel_{ch_id}.csv"
-            with open(filename, 'w', newline='', encoding='utf-8') as file:
+            file_name = f"channel_{ch_id}.csv"
+            file_path = os.path.join(folder_path, file_name)
+
+            with open(file_path, 'w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
                 for x, y in zip(channel.x_data, channel.y_data):
                     writer.writerow([x, y])
-                print(f"Data written to {filename}")
+                print(f"Data written to {file_name}")
 
         for ch_id, channel in self.channels.items():
             if channel.text == "":
                 continue
-            filename = f"channel_{ch_id}.txt"
-            with open(filename, 'w', newline='', encoding='utf-8') as file:
+            file_name = f"channel_{ch_id}.txt"
+            file_path = os.path.join(folder_path, file_name)
+            with open(file_path, 'w', newline='', encoding='utf-8') as file:
                 file.write(channel.text)
-                print(f"Text data written to {filename}")
+                print(f"Text data written to {file_name}")
 
     def clear_data(self):
         """

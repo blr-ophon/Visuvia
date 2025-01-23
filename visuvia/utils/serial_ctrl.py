@@ -126,13 +126,14 @@ class SerialCtrl():
             # DEBUG:
             # if msg:
             #     print(f"      << {msg}")
-            return msg
+            if msg.endswith(delimiter):
+                return msg
+            else:
+                return None
         except TypeError as exc:
             raise SerialCtrlError(f"Error: {exc}") from exc
         except serial.SerialException as exc:
             raise SerialCtrlError(f"Exception occurred while reading from port: {exc}") from exc
-        except TimeoutError:
-            return None
 
     def send(self, data):
         """
