@@ -9,6 +9,6 @@ class ConnManOrder(Enum):
     CH_INFO_DRAW = 6
 
 class CommTaskOrder(Enum):
-    SEND_REQUEST: 1
-    SEND_STOP: 2
-    SEND_DROP: 3
+    REQUEST = 1
+    STOP = 2
+    DROP = 3

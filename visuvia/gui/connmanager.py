@@ -218,7 +218,7 @@ class ConnManagerGUI():
         # Check queue every 100ms
         self.window.after(100, self.process_queue)
 
-    def enqueue_update(self, order, arg=None):
+    def place_order(self, order, arg=None):
         """
         """
         self.queue.put((order, arg))
@@ -250,7 +250,7 @@ class ConnManagerGUI():
         Start MCTP communication.
         """
         self.comm_task.start()
-        self.comm_task.start_sync()
+        self.comm_task.place_order("sync")
 
     def display_status_connected(self, channels_n):
         """
@@ -308,6 +308,7 @@ class ConnManagerGUI():
         """
         Destroy charts and disable all buttons.
         """
+        self.comm_task.place_order("drop")
         self.comm_task.stop()
         self.chartman_gui.reset()
         self.data_registry.clear_channels()
@@ -334,7 +335,7 @@ class ConnManagerGUI():
         self.text_display_gui.reset()
 
         # Send request frame to MCU
-        self.comm_task.send_request()
+        self.comm_task.place_order("request")
         # Initialize plotting thread
         self.chartman_gui.init_plot_task()
 
@@ -348,7 +349,7 @@ class ConnManagerGUI():
         Stop requesting data from performer. Callback for the 'Stop' button.
         """
         self.chartman_gui.stop_plot_task()
-        self.comm_task.send_stop()
+        self.comm_task.place_order("stop")
 
         if self.save_var.get():
             self.data_registry.save_data()

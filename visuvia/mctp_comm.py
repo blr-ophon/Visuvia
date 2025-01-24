@@ -19,9 +19,12 @@ import sys
 import time
 import threading
 from enum import Enum
+from queue import Queue
+# Third Party imports
+from crccheck.crc import Crc32, CrcXmodem
 # Local imports
 from visuvia.utils.mctp import MCTPFrame, MCTPParseError, serialize_frame
-from visuvia.gui.orders import ConnManOrder
+from visuvia.gui.orders import ConnManOrder, CommTaskOrder
 from visuvia.utils.serial_ctrl import SerialCtrlError
 
 
@@ -46,13 +49,15 @@ class TimeoutHandler():
             "sync": None,
             "ping": None,
             "stop": None,
-            "drop": None
+            "drop": None,
+            "end_task": None,
         }
         self.start_times = {
             "sync": None,
             "ping": None,
             "stop": None,
             "drop": None,
+            "end_task": None,
         }
 
     def set_timeout(self, frame_type, timeout):
@@ -104,9 +109,6 @@ class CommTask():
         update (threading.Condition()): Condition to notify state
                                               change to the thread.
         running (bool): Set when thread is running. Control thread execution.
-        flag_send_req (bool):
-        flag_send_stop (bool):
-        flag_send_drop (bool):
     """
     def __init__(self, serial_ctrl, data_registry, connman_gui=None):
         self.state = CommTaskState.IDLE
@@ -118,15 +120,10 @@ class CommTask():
         self.update = threading.Condition()
         self.running = False
 
-        # Set flags for the main thread to execute actions.
-        # All serial communication must happen inside commtask thread.
-        self.flag_send_req = False
-        self.flag_send_stop = False
-        self.flag_send_drop = False
-
         self.frames_received = 0
         self.bytes_received = 0
 
+        self.order_queue = Queue()
         self.timeouts = TimeoutHandler()
 
     def start(self):
@@ -148,67 +145,35 @@ class CommTask():
         Returns:
             None: Returns nothing.
         """
+        self.timeouts.set_timeout("end_task", 2)
+        while not self.order_queue.empty():
+            if self.timeouts.check_timeout("end_task"):
+                print("Warning: Task orders taking too long to end. " +
+                      "Closing without attending")
+
         self.running = False
         self._set_state(CommTaskState.IDLE)
         self.thread.join()
-        self.send_drop()
 
-    def start_sync(self):
-        """
-        Switch from IDLE to SYNC state.
-
-        Returns:
-            None: Returns nothing.
-        """
-        if self.connman_gui is not None:
-            self.connman_gui.enqueue_update(ConnManOrder.STATUS_SYNCING)
-        if self.state == CommTaskState.IDLE:
-            self._set_state(CommTaskState.SYNC)
-
-    def send_request(self):
-        """
-        Switch from CONNECTED to TRANSFER state. Sends REQUEST frame.
-
-        Returns:
-            None: Returns nothing.
-        """
-        if self.state != CommTaskState.CONNECTED:
-            return
-
-        self._set_state(CommTaskState.TRANSFER)
-
-        with self.update:
-            self.flag_send_req = True
-            self.update.notify()
-
-    def send_stop(self):
-        """
-        Send STOP frame. Only works if task is in transfer state.
-
-        Returns:
-            None: Returns nothing.
-        """
-        if self.state != CommTaskState.TRANSFER:
-            return
-
-        self.flag_send_stop = True
-        # with self.update:
-        #     self.flag_send_stop = True
-        #     self.update.notify()
-
-        self.frames_received = 0
-        self.bytes_received = 0
-
-    def send_drop(self):
-        """
-        Send DROP frame.
-
-        Returns:
-            None: Returns nothing.
-        """
-        with self.update:
-            self.flag_send_drop = True
-            self.update.notify()
+    def place_order(self, order):
+        match order:
+            case "sync":
+                if self.connman_gui is not None:
+                    self.connman_gui.place_order(ConnManOrder.STATUS_SYNCING)
+                if self.state == CommTaskState.IDLE:
+                    self._set_state(CommTaskState.SYNC)
+            case "request":
+                self.order_queue.put(CommTaskOrder.REQUEST)
+                with self.update:
+                    self.update.notify()
+            case "stop":
+                self.order_queue.put(CommTaskOrder.STOP)
+                with self.update:
+                    self.update.notify()
+            case "drop":
+                self.order_queue.put(CommTaskOrder.DROP)
+                with self.update:
+                    self.update.notify()
 
     def __application_event_handler(self):
         """
@@ -217,26 +182,32 @@ class CommTask():
         Returns:
             None: Returns nothing.
         """
-        # Drop has highest priority.
-        if self.flag_send_drop:
-            self.__drop_loop()
-            self.flag_send_drop = False
+        while not self.order_queue.empty():
+            order = self.order_queue.get()
+            match order:
+                case CommTaskOrder.REQUEST:
+                    if self.state != CommTaskState.CONNECTED:
+                        continue
 
-        elif self.flag_send_req:
-            req_frame = serialize_frame(frame_type="request")
-            self.serial_ctrl.send(req_frame)
-            self.flag_send_req = False
+                    self._set_state(CommTaskState.TRANSFER)
 
-            # Initialize time reference for plotting.
-            # This disconsiders the time for the request frame to arrive and
-            # the time for MCU to start sending data after being notified.
-            # FIXME: Use a dummy RDY packet to set reference for plot.
-            self.data_registry.set_time_ref()
+                    req_frame = serialize_frame(frame_type="request")
+                    self.serial_ctrl.send(req_frame)
+                    # Initialize time reference for plotting.
+                    # This disconsiders the time for the request frame to
+                    # arrive and the time for MCU to start sending data after
+                    # being notified.
+                    # FIXME: Use a dummy RDY packet to set reference for plot.
+                    self.data_registry.set_time_ref()
 
-        elif self.flag_send_stop:
-            self.__stop_loop()
-            self.frames_received = 0
-            self.bytes_received = 0
+                case CommTaskOrder.STOP:
+                    if self.state != CommTaskState.TRANSFER:
+                        continue
+                    self.__stop_loop()
+                    self.frames_received = 0
+                    self.bytes_received = 0
+                case CommTaskOrder.DROP:
+                    self.__drop_loop()
 
     def __run(self):
         """
@@ -248,8 +219,8 @@ class CommTask():
         """
 
         while self.running:
-            with self.update:
 
+            with self.update:
                 self.__application_event_handler()
 
                 if self.state == CommTaskState.IDLE:
@@ -265,7 +236,7 @@ class CommTask():
                         self._set_state(CommTaskState.IDLE)
                         #  Update GUI
                         if self.connman_gui is not None:
-                            self.connman_gui.enqueue_update(
+                            self.connman_gui.place_order(
                                 ConnManOrder.STATUS_FAILED
                             )
                         continue
@@ -285,7 +256,7 @@ class CommTask():
                     if self.connman_gui is not None:
                         self.connman_gui.ch_info_gui.place_channel_info()
 
-                        self.connman_gui.enqueue_update(
+                        self.connman_gui.place_order(
                             ConnManOrder.STATUS_CONNECTED,
                             received_frame.n_of_channels
                         )
@@ -331,12 +302,12 @@ class CommTask():
                                 updated_channels
                             )
                             # Display any received text.
-                            self.connman_gui.enqueue_update(
+                            self.connman_gui.place_order(
                                 ConnManOrder.APPEND_TEXT,
                                 received_frame.text_channels
                             )
                             # Display info.
-                            self.connman_gui.enqueue_update(
+                            self.connman_gui.place_order(
                                 ConnManOrder.CH_INFO_DRAW
                             )
 
@@ -382,7 +353,6 @@ class CommTask():
                 continue
 
         self._set_state(CommTaskState.CONNECTED)
-        self.flag_send_stop = False
 
     def __drop_loop(self):
         """
@@ -415,7 +385,6 @@ Restart performer if future connection attempts fails")
                 continue
 
         self._set_state(CommTaskState.IDLE)
-        self.flag_send_drop = False
 
     def __sync_loop(self):
         """
