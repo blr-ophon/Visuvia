@@ -373,6 +373,7 @@ Restart performer if future connection attempts fails")
             try:
                 self.serial_ctrl.send(drop_frame)
                 response = self.serial_ctrl.listen_msg(delimiter=b"$%&")
+                print(response)
                 if response is not None:
                     received_frame.parse(response)
             except SerialCtrlError as exc:
