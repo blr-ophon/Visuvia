@@ -36,8 +36,8 @@ CMD mode: saves received data to csv and text files.
 
 ## CMD commands
 
-**sync**: Try to connect to microcontroller.  
+**sync**: Connect to microcontroller.  
 **drop**: Disconnect from microcontroller.  
-**request**: Start receiving data.  
-**stop**: Stop data transfer. Save data to csv and text files.  
+**request**: Start data transfer.
+**stop**: End data transfer. Save data to csv and text files.  
 **exit**: Exit visuvia cmd.  
