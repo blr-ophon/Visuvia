@@ -14,7 +14,7 @@ Visuvia uses [MCTP](https://github.com/blr-ophon/MCTP) protocol for communicatio
 - matplotlib
 - pyserial
 
-## Running
+## Usage
 
 Clone the repository:
 
@@ -22,21 +22,16 @@ Clone the repository:
   git clone --recurse-submodules https://github.com/blr-ophon/visuvia
 ```
 
-Launch with:
 
+GUI mode: Allows data visualization in real time. 
 ```bash
   python main.py --gui 
 ```
-or 
 
+CMD mode: saves received data to csv and text files.
 ```bash
   python main.py --cmd
 ```
-
-## Usage
-
-Use the MCTP api (still to be documented) on your MCU to communicate with visuvia.
-GUI allows data visualization in real time, cmd saves  received data to csv and text files.
 
 
 ## CMD commands
