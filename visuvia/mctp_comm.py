@@ -21,7 +21,7 @@ import threading
 from enum import Enum
 from queue import Queue
 # Third Party imports
-from crccheck.crc import Crc32, CrcXmodem
+# from crccheck.crc import Crc32, CrcXmodem
 # Local imports
 from visuvia.utils.mctp import MCTPFrame, MCTPParseError, serialize_frame
 from visuvia.gui.orders import ConnManOrder, CommTaskOrder

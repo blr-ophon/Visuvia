@@ -3,6 +3,8 @@
 
 Currently in test. Only tested with STM32F3 MCUs.
 
+Visuvia uses [MCTP](https://github.com/blr-ophon/MCTP) protocol for communication through UART.
+
 <img src='./misc/demo.gif'>
 
 

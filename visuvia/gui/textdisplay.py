@@ -14,11 +14,11 @@ class TextDisplayGUI():
     """
     Describe this class
     """
-    def __init__(self, window):
+    def __init__(self, root):
         """
         Describe this method
         """
-        self.frame = tk.Frame(window)
+        self.frame = tk.Frame(root)
 
         self.scrollbar = tk.Scrollbar(self.frame)
 

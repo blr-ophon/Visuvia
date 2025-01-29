@@ -39,7 +39,7 @@ class ConnManagerGUI():
     Has methods to create, manage and place widgets on the window.
 
     Attributes:
-        window (tk.Tk): The tk window.
+        root (tk.Tk): The tk window.
         data_registry (DataRegistry): Data registy for the communication task.
         comm_task: MCTP communication task.
         chartman (ChartsManagerGUI): Charts manager.
@@ -67,19 +67,19 @@ class ConnManagerGUI():
         _add_chart: Callback for '+' button.
         _remove_chart: Callback for '-' button.
     """
-    def __init__(self, window, serial_ctrl):
-        self.window = window
+    def __init__(self, root, serial_ctrl):
+        self.root = root 
         self.data_registry = DataRegistry()
         self.queue = Queue()
 
         self.comm_task = CommTask(serial_ctrl, self.data_registry, self)
-        self.chartman_gui = ChartsManagerGUI(self.window, self.data_registry)
-        self.ch_info_gui = ChannelInfoGUI(self.window, self.data_registry, 0.4)
-        self.text_display_gui = TextDisplayGUI(self.window)
+        self.chartman_gui = ChartsManagerGUI(self.root, self.data_registry)
+        self.ch_info_gui = ChannelInfoGUI(self.root, self.data_registry, 0.4)
+        self.text_display_gui = TextDisplayGUI(self.root)
 
         # FRAME
         self.frame = tk.LabelFrame(
-            master=window,
+            master=root,
             text="Connection Manager",
             padx=5,
             pady=5,
@@ -216,7 +216,7 @@ class ConnManagerGUI():
                 case ConnManOrder.CH_INFO_DRAW:
                     self.ch_info_gui.draw()
         # Check queue every 100ms
-        self.window.after(100, self.process_queue)
+        self.root.after(100, self.process_queue)
 
     def place_order(self, order, arg=None):
         """

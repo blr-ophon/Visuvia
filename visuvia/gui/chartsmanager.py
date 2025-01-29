@@ -40,7 +40,7 @@ class ChartsManagerGUI():
     in the grid. Also has methods to start and stop plotting on the charts.
 
     Attributes:
-        window (tk.Tk): The tk window.
+        root (tk.Tk): The tk window.
         data_registry (DataRegistry): The data registry. Source of plot data.
         plotting (bool): Set when plotting, clear when idle.
         charts (list[ChartGUI]): List of charts managed.
@@ -56,8 +56,8 @@ class ChartsManagerGUI():
     Internal Methods:
         _adjust_charts: Adjust charts placing on the grid.
     """
-    def __init__(self, window, data_registry):
-        self.window = window
+    def __init__(self, root, data_registry):
+        self.root = root 
         self.data_registry = data_registry
         # For charts created during plotting
         self.plotting = False
@@ -65,7 +65,7 @@ class ChartsManagerGUI():
         # list of chart data for each chart
         self.charts = []
 
-        self.frame = tk.Frame(self.window, bg="lightgrey", bd=5,
+        self.frame = tk.Frame(self.root, bg="lightgrey", bd=5,
                               relief=tk.GROOVE)
         self.frame.grid(row=0, column=1, padx=10, pady=10,
                         rowspan=4, sticky="nsew")

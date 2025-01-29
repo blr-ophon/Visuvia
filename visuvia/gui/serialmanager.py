@@ -1,6 +1,6 @@
 # Third party imports
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, font
 # Local imports
 from visuvia.utils.serial_ctrl import SerialCtrlError
 
@@ -14,7 +14,7 @@ class SerialManagerGUI():
     Has methods to create, manage and place widgets on the window.
 
     Attributes:
-        window (tk.Tk): the tk window.
+        root (tk.Tk): the tk window.
         connman_gui (ConnManagerGUI): Connection Manager.
         serial_ctrl (SerialCtrl): Serial port manager.
         frame (tk.LabelFrame): Menu frame.
@@ -38,17 +38,23 @@ class SerialManagerGUI():
     Private Methods:
         __connect_ctrl: Checks if 'Connect' button can be enabled.
     """
-    def __init__(self, window, serial_ctrl, connman_gui):
-        self.window = window
+    def __init__(self, root, serial_ctrl, connman_gui):
+        self.root = root
         self.connman_gui = connman_gui
         self.serial_ctrl = serial_ctrl
 
         # Frame
-        self.frame = tk.LabelFrame(master=window, text="Serial Manager",
+        self.frame = tk.LabelFrame(master=root, text="Serial Manager",
                                    padx=5, pady=5, bg="lightgrey")
         # Static widgets
         lbl_com = tk.Label(self.frame, text="Available Port(s): ",
                            bg="lightgrey", width=15, anchor="w")
+
+        label_font = font.Font(font=lbl_com.cget("font"))
+        print("Font family:", label_font.actual("family"))
+        print("Font size:", label_font.actual("size"))
+        print("Font weight:", label_font.actual("weight"))
+
         lbl_com.grid(column=1, row=2)
         lbl_bd = tk.Label(self.frame, text="Baud rate: ",
                           bg="lightgrey", width=15, anchor="w")
