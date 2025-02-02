@@ -272,6 +272,8 @@ class ConnManagerGUI():
             self.btn_remove_chart["state"] = "normal"
             self.chkbtn_save["state"] = "normal"
 
+        # TODO: Set 'Connect' label ONLY AFTER SUCCESSFULL CONNECTION
+
     def display_status_syncing(self):
         """
         Updates GUI after start of sync phase.

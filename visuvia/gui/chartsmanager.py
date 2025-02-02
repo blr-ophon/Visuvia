@@ -14,7 +14,7 @@ Dependencies:
 - tkinter
 """
 
-
+import time
 # Third party imports
 import tkinter as tk
 import matplotlib.pyplot as pplt
@@ -237,12 +237,15 @@ class ChartGUI():
         Returns:
             None: Returns nothing.
         """
-        self._place_graph()
         self._place_channel_menu()
         self._place_type_menu()
         self._place_filter_menu()
         self._place_interval_entry()
         self.__interval_scroll_event()
+        self._place_graph()
+
+        self.frame.grid_columnconfigure(1, weight=1)
+        self.frame.grid_rowconfigure(1, weight=1)
 
     def start_ani(self, framerate=30):
         """
@@ -318,11 +321,12 @@ class ChartGUI():
         self.axes.set_xlim(0, 10)
         self.axes.set_ylim(-10, 10)
 
-        self.canvas_widget.grid(column=1, row=1, columnspan=3, sticky="nsew")
         self.canvas_widget.config(bg="lightgrey", relief="sunken", bd=4)
-
-        self.frame.grid_columnconfigure(1, weight=1)
-        self.frame.grid_rowconfigure(1, weight=1)
+        self.canvas_widget.grid(column=1, row=1, columnspan=3, rowspan=2, sticky="nsew")
+        # FIXME: This is a quickfix for the canvas rendering problem, where
+        # for some reason the frame is drawn faster then the canvas. The program,
+        # however, still has a weird animation when inserting charts.
+        self.frame.update_idletasks()
 
         # Initialize lines with empty plots.
         for ch_id in list(self.data_registry.channels.keys()):
@@ -557,6 +561,8 @@ class ChartGUI():
         if frame % 10 == 0 and not self.oscilloscope:
             self.canvas.draw()
         # Update window
+        # TODO: test updating only the frame idletasks.
+        # self.frame.update_idletasks()
         self.frame.master.master.update_idletasks()
 
         artists = []
