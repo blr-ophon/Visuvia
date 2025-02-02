@@ -19,7 +19,8 @@ import time
 import tkinter as tk
 import matplotlib.pyplot as pplt
 from matplotlib.animation import FuncAnimation
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import (
+    FigureCanvasTkAgg, NavigationToolbar2Tk)
 
 
 __all__ = ["ChartsManagerGUI", "ChartGUI"]
@@ -243,6 +244,7 @@ class ChartGUI():
         self._place_interval_entry()
         self.__interval_scroll_event()
         self._place_graph()
+        self._place_toolbar()
 
         self.frame.grid_columnconfigure(1, weight=1)
         self.frame.grid_rowconfigure(1, weight=1)
@@ -322,7 +324,7 @@ class ChartGUI():
         self.axes.set_ylim(-10, 10)
 
         self.canvas_widget.config(bg="lightgrey", relief="sunken", bd=4)
-        self.canvas_widget.grid(column=1, row=1, columnspan=3, rowspan=2, sticky="nsew")
+        self.canvas_widget.grid(column=1, row=1, columnspan=3, sticky="nsew")
         # FIXME: This is a quickfix for the canvas rendering problem, where
         # for some reason the frame is drawn faster then the canvas. The program,
         # however, still has a weird animation when inserting charts.
@@ -334,6 +336,12 @@ class ChartGUI():
                                    animated=True)
             line.set_color(line_colors[ch_id])
             self.lines[ch_id] = line
+
+    def _place_toolbar(self):
+        self.toolbar_frame = tk.Frame(self.frame)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbar_frame)
+        self.toolbar.update()
+        self.toolbar_frame.grid(column=1, row=2, columnspan=3, sticky="nsew")
 
     @staticmethod
     def __btn_ch_selector_toggle(button, var):
@@ -366,7 +374,7 @@ class ChartGUI():
             master=self.frame,
             text="Available Channels",
             bg="lightgrey")
-        ch_menu_frame.grid(column=0, row=0, rowspan=2,
+        ch_menu_frame.grid(column=0, row=0, rowspan=3,
                            padx=5, pady=5, sticky="N")
 
         button_count = 0
